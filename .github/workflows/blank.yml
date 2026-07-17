@@ -1,0 +1,45 @@
+name: Sync nginx vim files
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream contrib/vim
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sSfL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/nginx/nginx/git/trees/master?recursive=1" \
+          | jq -r '.tree[]
+                   | select(.type=="blob")
+                   | select(.path|startswith("contrib/vim/"))
+                   | .path' > /tmp/paths.txt
+
+          while read -r p; do
+            rel="${p#contrib/vim/}"
+            mkdir -p "$(dirname "$rel")"
+            curl -sSfL "https://raw.githubusercontent.com/nginx/nginx/master/$p" -o "$rel"
+          done < /tmp/paths.txt
+
+      - name: Commit if changed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "sync: nginx contrib/vim @ $(date -u +%F)"
+            git push
+          else
+            echo "No changes."
+          fi
